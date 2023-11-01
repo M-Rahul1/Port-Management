@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Port Data Lookup</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css">
+  <style>
+    body {
+      background-image: url('ships-background.jpg');
+      background-repeat: repeat;
+    }
+    .container {
+      margin-top: 50px;
+    }
+    .card {
+      margin-bottom: 20px;
+    }
+    .card-header {
+      background-color: #f8f9fa;
+      font-weight: bold;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    th, td {
+      padding: 8px;
+      text-align: left;
+      border-bottom: 1px solid #ddd;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="text-center">Port Data Lookup</h1>
+
+    <div class="mb-3">
+      <label for="searchInput" class="form-label">Search by MMSI or IMO:</label>
+      <div class="input-group">
+        <input type="text" id="searchInput" class="form-control">
+        <button onclick="searchPortData()" class="btn btn-primary">Search</button>
+      </div>
+    </div>
+
+    <div class="text-end mb-3">
+      <button onclick="sortTableByVesselType()" class="btn btn-secondary me-2">Sort by Vessel Type</button>
+      <button onclick="sortTableByTimeETA()" class="btn btn-secondary">Sort by TimeETA</button>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        Port Data
+      </div>
+      <div class="card-body">
+        <table id="portDataTable" class="table">
+          <thead>
+            <tr>
+              <th>MMSI</th>
+              <th>TimePosition</th>
+              <th>Latitude</th>
+              <th>Longitude</th>
+              <th>NavStatus</th>
+              <th>TimeVoyage</th>
+              <th>IMO</th>
+              <th>Name</th>
+              <th>VesselType</th>
+              <th>TimeETA</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        Details
+      </div>
+      <div class="card-body" id="detailsContainer"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        Energy Efficiency vs. IMO Scatter Graph
+      </div>
+      <div class="card-body">
+        <canvas id="energyEfficiencyChart"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        Average Energy Efficiency
+      </div>
+      <div class="card-body" id="averageEnergyEfficiencyContainer"></div>
+    </div>
+    
+    
+    <div class="card">
+      <div class="card-header">
+        CO2 Emission vs. Vessel IMO Scatter Graph
+      </div>
+      <div class="card-body">
+        <canvas id="co2IMOChart"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        Average CO2 Emission
+      </div>
+      <div class="card-body" id="averageCO2Container"></div>
+    </div>
+
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    let portData = [];
+    let co2Emissions = [];
+    let imos = [];
+    let timeValues = [];
+
+        // JavaScript comment: Function to display all port data
+    async function displayAllPortData() {
+      const tableBody = document.getElementById('tableBody');
+
+      try {
+        const response = await fetch('data1.csv');
+        const text = await response.text();
+        const rows = text.split('\n');
+        const headers = rows[0].split('\t');
+
+        for (let i = 1; i < rows.length; i++) {
+          const cells = rows[i].split('\t');
+
+          if (cells.length !== headers.length) {
+            continue; // Skip rows with inconsistent number of cells
+          }
+
+          const row = document.createElement('tr');
+
+          for (let j = 0; j < 10; j++) {
+            const cell = document.createElement('td');
+            cell.textContent = cells[j];
+            row.appendChild(cell);
+          }
+
+          row.addEventListener('click', () => {
+            displayDetails(cells);
+          });
+
+          const co2Emission = parseFloat(cells[21]); // Assuming CO2 emissions value is at index 21
+          const imo = cells[6]; // Assuming IMO value is at index 6
+          const timeValue = new Date(cells[23]); // Assuming time value is at index 23
+
+          portData.push(cells);
+          co2Emissions.push(co2Emission);
+          imos.push(imo);
+          timeValues.push(timeValue);
+
+          tableBody.appendChild(row);
+        }
+
+        renderEnergyEfficiencyChart();
+        calculateAverageEnergyEfficiency();        
+        renderCO2IMOChart();
+        calculateAverageCO2Emission();
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+        // JavaScript comment: Function to display details of a selected row
+    function displayDetails(data) {
+      const detailsContainer = document.getElementById('detailsContainer');
+      const headers = [
+        'MMSI',
+        'TimePosition',
+        'SourcePosition',
+        'Latitude',
+        'Longitude',
+        'Speed',
+        'Course',
+        'Heading',
+        'NavStatus',
+        'TimeVoyage',
+        'SourceVoyage',
+        'IMO',
+        'Name',
+        'Callsign',
+        'Flag',
+        'VesselType',
+        'Length',
+        'Width',
+        'DimA',
+        'DimB',
+        'energyEfficiency',
+        'Co2Emission',
+        'Destination',
+        'TimeETA',
+        'Draught'
+      ];
+
+      const details = headers.reduce((html, header, index) => {
+        return html + `<p>${header}: ${data[index]}</p>`;
+      }, '');
+
+      detailsContainer.innerHTML = details;
+    }
+
+    // JavaScript comment: Function to search port data by MMSI or IMO
+    function searchPortData() {
+      const searchInput = document.getElementById('searchInput');
+      const query = searchInput.value.trim().toLowerCase();
+      const filteredData = portData.filter(row => {
+        const mmsi = row[0].toLowerCase();
+        const imo = row[6].toLowerCase();
+        return mmsi === query || imo === query;
+      });
+
+      renderTableData(filteredData);
+    }
+
+    // JavaScript comment: Function to sort table data by vessel type
+    function sortTableByVesselType() {
+      const sortedData = portData.slice(1).sort((a, b) => {
+        const vesselTypeA = a[8].toLowerCase();
+        const vesselTypeB = b[8].toLowerCase();
+        return vesselTypeA.localeCompare(vesselTypeB);
+      });
+
+      renderTableData([portData[0], ...sortedData]);
+    }
+
+    function sortTableByTimeETA() {
+      const sortedData = portData.slice(1).sort((a, b) => {
+        const timeETA_A = new Date(a[9]);
+        const timeETA_B = new Date(b[9]);
+        return timeETA_A - timeETA_B;
+      });
+
+      renderTableData([portData[0], ...sortedData]);
+    }
+
+    // Function to render table data    
+    function renderTableData(data) {
+      const tableBody = document.getElementById('tableBody');
+      tableBody.innerHTML = '';
+
+      for (let i = 0; i < data.length; i++) {
+        const row = document.createElement('tr');
+
+        for (let j = 0; j < 10; j++) {
+          const cell = document.createElement('td');
+          cell.textContent = data[i][j];
+          row.appendChild(cell);
+        }
+
+        row.addEventListener('click', () => {
+          displayDetails(data[i]);
+        });
+
+        tableBody.appendChild(row);
+      }
+    }
+
+    // JavaScript comment: Function to render the energy efficiency chart
+    function renderEnergyEfficiencyChart() {
+      const energyEfficiencyChart = document.getElementById('energyEfficiencyChart').getContext('2d');
+      const labels = portData.slice(1).map(row => row[6]); // Assuming IMO value is at index 6
+      const data = portData.slice(1).map(row => parseFloat(row[20])); // Assuming energy efficiency value is at index 20
+
+      new Chart(energyEfficiencyChart, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: 'Energy Efficiency vs. VesselIMO',
+              data: data,
+              backgroundColor: 'rgba(54, 162, 235, 0.6)',
+              borderColor: 'rgba(54, 162, 235, 1)',
+              borderWidth: 1
+            }
+          ]
+        },
+        options: {
+          scales: {
+            y: {
+              beginAtZero: true,
+              max: 100
+            }
+          }
+        }
+      });
+    }
+
+ 
+
+
+    // function performClustering() {
+    //   const kmeans = new KMeans();
+    //   const { clusters: clusterIndices } = kmeans.cluster(clusteringData, 3); // Assuming 3 clusters
+
+    //   clusters = clusterIndices.map(index => index + 1); // Add 1 to cluster index for visualization
+    // }
+    function calculateAverageEnergyEfficiency() {
+  const energyEfficiencyData = portData.slice(1).map(row => parseFloat(row[20])); // Assuming energy efficiency value is at index 20
+  const sum = energyEfficiencyData.reduce((acc, cur) => acc + cur, 0);
+  const average = sum / energyEfficiencyData.length;
+
+  const averageEnergyEfficiencyContainer = document.getElementById('averageEnergyEfficiencyContainer');
+  averageEnergyEfficiencyContainer.innerHTML = `<p>Average Energy Efficiency: ${average.toFixed(2)}</p>`;
+}
+
+
+    function renderCO2IMOChart() {
+      const co2IMOChart = document.getElementById('co2IMOChart').getContext('2d');
+
+      new Chart(co2IMOChart, {
+        type: 'scatter',
+        data: {
+          labels: imos,
+          datasets: [
+            {
+              label: 'CO2 Emission vs. Vessel IMO',
+              data: co2Emissions.map((co2Emission, index) => ({ x: index, y: co2Emission })),
+              backgroundColor: 'rgba(255, 99, 132, 0.6)',
+              borderColor: 'rgba(255, 99, 132, 1)',
+              borderWidth: 1
+            }
+          ]
+        },
+        options: {
+          scales: {
+            x: {
+              type: 'linear',
+              position: 'bottom'
+            },
+            y: {
+              beginAtZero: true
+            }
+          }
+        }
+      });
+    }
+
+    function calculateAverageCO2Emission() {
+      const averageCO2Emission = co2Emissions.reduce((sum, emission) => sum + emission, 0) / co2Emissions.length;
+      const averageCO2Container = document.getElementById('averageCO2Container');
+      averageCO2Container.innerHTML = `Average CO2 Emission: ${averageCO2Emission.toFixed(2)}`;
+    }
+
+    displayAllPortData();
+  </script>
+</body>
+</html>
